@@ -13,9 +13,9 @@ public class RedisIdWorker {
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
-    public static final long BEGIN_TIMESTAMP = 1609459200000L; //设置开始时间 2021-01-01 00:00:00
+    public static final long BEGIN_TIMESTAMP = 1640995200L; //设置开始时间 2022.01.01 00:00:00
 
-    private static final int COUNT_BITS = 32;// 序列号长度
+    private static final long COUNT_BITS = 32L;// 序列号长度
 
     public long nextId(String keyPrefix) {
         //1. 获取当前时间戳
