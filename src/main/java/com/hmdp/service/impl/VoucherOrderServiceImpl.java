@@ -9,8 +9,10 @@ import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisIdWorker;
+import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
 import org.springframework.aop.framework.AopContext;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +36,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Resource
     private ISeckillVoucherService seckillVoucherService;
 
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+
 
     @Override
     public Result seckillVoucher(Long voucherId) {
@@ -53,12 +58,33 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return Result.fail("秒杀券不在有效时间！");
         }
 
+        /*
+        * 这里用于单个服务器，不会出现多个服务器同时抢购的情况，因为这里会加锁，但是如果是分布式服务器，这里就会存在问题，
+        * */
         // 创建订单的逻辑封装，并加上事务控制和用户锁，保证一个用户只能买一单
-        Long userId = UserHolder.getUser().getId();
-        // 由于toString的源码是new String，因此只用userId.toString()，每次生成的都是新的字符串，因此要加上intern()，如果字符串常量池存在这个一个字符串，则返回池中的字符串，即可以保证同一个id字符串加锁
-        synchronized (userId.toString().intern()) {
+//        Long userId = UserHolder.getUser().getId();
+//        // 由于toString的源码是new String，因此只用userId.toString()，每次生成的都是新的字符串，因此要加上intern()，如果字符串常量池存在这个一个字符串，则返回池中的字符串，即可以保证同一个id字符串加锁
+//        synchronized (userId.toString().intern()) {
+//            IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
+//            return proxy.createVoucherOrder(voucherId);
+//        }
+
+        /*
+        * 通过redis创建分布式锁，用于集群服务*/
+        SimpleRedisLock simpleRedisLock = new SimpleRedisLock("order:" + UserHolder.getUser().getId(), stringRedisTemplate);
+        // 尝试加锁
+        boolean b = simpleRedisLock.tryLock(2);
+        // 加锁失败，说明已经有线程获取
+        if (!b){
+            return Result.fail("抢购失败，请重试！");
+        }
+
+        // 创建订单的逻辑封装，并加上事务控制和用户锁，保证一个用户只能买一单
+        try {
             IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
             return proxy.createVoucherOrder(voucherId);
+        }finally {
+            simpleRedisLock.unlock();
         }
     }
 
